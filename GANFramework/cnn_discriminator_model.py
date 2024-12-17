@@ -1,3 +1,5 @@
+import numpy as np
+
 from GANFramework.discriminator_model import DiscriminatorModel
 
 import torch
@@ -5,40 +7,49 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-class MLPModel(nn.Module):
-    def __init__(self, input_size):
-        self.input_size = input_size
-        super(MLPModel, self).__init__()
-        self.model = torch.nn.Sequential(
-            torch.nn.Linear(self.input_size, 1024),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(1024, 512),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(512, 256),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(256, 1),
-            torch.nn.Sigmoid(),
-        )
+class CNNModel(nn.Module):
+    def __init__(self, ):
+
+        super(CNNModel, self).__init__()
+
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+
+        self.fc1 = nn.Linear(128 * 3 * 3, 256)  # 128 channels, 3x3 image size after pooling
+        self.fc2 = nn.Linear(256, 1)  # Output one value for binary classification
+
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x = x.view(x.size(0), self.input_size)
-        output = self.model(x)
-        return output
+        x = self.relu(self.conv1(x))
+        x = self.pool(x)
+
+        x = self.relu(self.conv2(x))
+        x = self.pool(x)
+
+        x = self.relu(self.conv3(x))
+        x = self.pool(x)
+
+        x = x.view(-1, 128 * 3 * 3)  # Flatten the tensor for the fully connected layers
+        x = self.relu(self.fc1(x))
+        x = self.fc2(x)
+
+        x = self.sigmoid(x)  # Apply sigmoid to get output between 0 and 1 (binary classification)
+        return x
 
 
-class MLPDiscriminatorModel(DiscriminatorModel):
-
-    def __init__(self, image_shape):
+class CNNDiscriminatorModel(DiscriminatorModel):
+    def __init__(self, ):
         self.hyperparameters = self.__default_hyperparameters()
         device_used = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"MLPDiscriminatorModel is using {device_used}")
         self.device = torch.device(device_used)
 
         # Define the model
-        self.mlp_model = MLPModel(input_size=(image_shape[0] * image_shape[1])).to(self.device)
+        self.cnn_model = CNNModel().to(self.device)
 
         # Define loss function and optimizer
         self.criterion = nn.BCELoss()
@@ -46,7 +57,7 @@ class MLPDiscriminatorModel(DiscriminatorModel):
 
     # Override parent function
     def should_flatten_inputs(self):
-        return True
+        return False
 
     # HYPERPARAMETERS
     def __default_hyperparameters(self) -> dict:
@@ -73,26 +84,28 @@ class MLPDiscriminatorModel(DiscriminatorModel):
 
         if self.optimizer is None:
             self.optimizer = optim.Adam(
-                self.mlp_model.parameters(),
+                self.cnn_model.parameters(),
                 lr=self.hyperparameters["learning_rate"],
                 weight_decay=self.hyperparameters["regularization_rate"]
             )
 
+        inputs = np.expand_dims(inputs, axis=1)  # Adding channel dimension, result shape: (50000, 1, 28, 28)
+
         # Create DataLoader
         dataset = TensorDataset(torch.tensor(inputs, dtype=torch.float32), torch.tensor(labels, dtype=torch.float32))
-        dataloader = DataLoader(dataset, batch_size=self.hyperparameters.get("batch_size", 32), shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=self.hyperparameters["batch_size"], shuffle=True)
 
         epochs_losses = []
 
         # Training loop
         for epoch in range(nb_of_epochs):
-            self.mlp_model.train() # set to 'training state'
+            self.cnn_model.train() # set to 'training state'
             epoch_loss = 0.0
             for batch_inputs, batch_labels in dataloader:
                 batch_inputs, batch_labels = batch_inputs.to(self.device), batch_labels.to(self.device)
 
                 self.optimizer.zero_grad() # Reset gradient
-                outputs = self.mlp_model(batch_inputs)
+                outputs = self.cnn_model(batch_inputs)
                 loss = self.criterion(outputs.squeeze(), batch_labels)
                 loss.backward()
                 self.optimizer.step()
@@ -107,10 +120,11 @@ class MLPDiscriminatorModel(DiscriminatorModel):
         """
         Predict probability of inputs being real
         """
-        self.mlp_model.eval() # Set to 'evaluation state'
+        self.cnn_model.eval() # Set to 'evaluation state'
         with torch.no_grad():
+            inputs = np.expand_dims(inputs, axis=1)  # Adding channel dimension, result shape: (50000, 1, 28, 28)
             inputs = torch.tensor(inputs, dtype=torch.float32).to(self.device)
-            probabilities = self.mlp_model(inputs)
+            probabilities = self.cnn_model(inputs)
 
         return probabilities.squeeze().cpu().numpy()
 

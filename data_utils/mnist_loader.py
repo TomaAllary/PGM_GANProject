@@ -27,7 +27,7 @@ class MNISTLoader:
     #########################################################################
     #                       LOADING FUNCTIONS                               #
     #########################################################################
-    def load_mnist_data(self, specific_digit=None):
+    def load_mnist_data(self):
 
         # Download if needed
         if not os.path.exists(self.mnist_path):
@@ -39,7 +39,7 @@ class MNISTLoader:
         y_test = np.load(os.path.join(self.mnist_path, "y_test.npy"))
 
         # Apply enabled pre-process
-        if specific_digit is not None:
+        if self._specific_digit is not None:
             x_train, y_train, x_test, y_test = self._use_specific_digit(x_train, y_train, x_test, y_test)
         if self._normalize_image:
             x_train, x_test = self._normalize_images(x_train, x_test)

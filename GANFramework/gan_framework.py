@@ -62,33 +62,45 @@ class GANFramework:
             mixed_x = mixed_x[indices]
             mixed_y = mixed_y[indices]
 
+            # Add some noise to make discriminator game more difficult
+            corrupt_ratio = 0.15
+            nb_of_corrupted_idx = int(len(mixed_y) * corrupt_ratio)
+            np.random.shuffle(indices)
+            corrupted_indices = indices[:nb_of_corrupted_idx]
+
+            mixed_y[corrupted_indices] = (mixed_y[corrupted_indices] * -1) + 1 # Swap 0->1 & 1->0
+
+
             # 4. Train discrminator for 1 epoch
             print(f"Training Discriminator for epoch {epoch} / {nb_of_epochs}")
             print(f"Fake: {fake_samples_x.shape[0]}, Real: {real_samples_x.shape[0]}")
-            losses = self.discriminator.train(mixed_x, mixed_y, nb_of_epochs=50)
-            print(f"Loss after training: {losses[-1]}")
+            losses = self.discriminator.train(mixed_x, mixed_y, nb_of_epochs=1)
+            print(f"Discriminator loss after training: {losses[-1]}")
 
             #########################
             #       Generator       #
             #########################
 
-            # 5. Generate fake samples
-            # *use same nb of samples as discriminator to be fair
-            generated_samples = self.generator.generate_samples(mixed_x.shape[0])
-            generated_samples_target_labels = np.ones(generated_samples.shape[0])
+            nb_of_generator_step_per_epoch = 4
+            for step in range(nb_of_generator_step_per_epoch):
+                # 5. Generate fake samples
+                # *use same nb of samples as discriminator to be fair
+                generated_samples = self.generator.generate_samples(mixed_x.shape[0])
+                generated_samples_target_labels = np.ones(generated_samples.shape[0])
 
-            # 6. Make discrminator predict if generator samples are real
-            predictions_proba = self.discriminator.predict_proba(generated_samples)
+                # 6. Make discrminator predict if generator samples are real
+                predictions_proba = self.discriminator.predict_proba(generated_samples)
 
-            # 7. Update generator
-            print(f"Training Generator for epoch {epoch} / {nb_of_epochs}")
-            print(f"Fake: {generated_samples.shape[0]}")
-            self.generator.update_generator(predictions_proba)
+                # 7. Update generator
+                print(f"Training Generator for epoch {epoch} / {nb_of_epochs}")
+                print(f"Fake: {generated_samples.shape[0]}")
+                generator_loss = self.generator.update_generator(predictions_proba)
+                print(f"Generator loss after training: {generator_loss}")
 
             # Evaluate discrminator
             report = self.evaluate_discriminator()
             print("Discriminator Evaluation Report for epoch " + str(epoch+1))
-            print(f"Precision: {report['macro avg']['precision']}, Recall: {report['macro avg']['recall']}, F1: {report['macro avg']['f1-score']}")
+            print(f"Precision: {report['precision']}, Recall: {report['recall']}, F1: {report['f1-score']}, Accuracy: {report['accuracy']}")
             discriminator_metrics_per_epoch.append(report)
 
         # Return metrics #TODO: explore metric for generator evaluation
@@ -179,10 +191,11 @@ class DiscriminatorFramework:
             # epoch += 4
 
             loss_curve.extend(losses)
-            print(f"Loss after training: {losses[-1]}")
+            print(f"Discriminator loss after training: {losses[-1]}")
 
             # Evaluate discriminator
-            report, accuracy = self.evaluate_discriminator()
+            report = self.evaluate_discriminator()
+            accuracy = report['accuracy']
             acc_curve.append(accuracy)
 
             if accuracy > self.best_accuracy or self.best_model is None:
@@ -191,12 +204,13 @@ class DiscriminatorFramework:
                 self.best_model = self.discriminator
 
             print("Discriminator Evaluation Report for epoch " + str(epoch+1))
-            print(f"Accuracy: {accuracy}, Precision: {report['macro avg']['precision']}, Recall: {report['macro avg']['recall']}, F1: {report['macro avg']['f1-score']}")
+            print(f"Accuracy: {accuracy}, Precision: {report['precision']}, Recall: {report['recall']}, F1: {report['f1-score']}")
             discriminator_metrics_per_epoch.append(report)
 
         return discriminator_metrics_per_epoch, loss_curve, acc_curve
 
     def evaluate_discriminator(self):
+        print(np.unique(self.y_validation))
         return self.discriminator.evaluate(self.x_validation, self.y_validation)
 
     def generate_samples(self, nb_of_samples):

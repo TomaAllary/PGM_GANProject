@@ -24,8 +24,7 @@ class DiscriminatorModel:
         """
         Predict the most probably class (0 or 1) (fake or real)
         """
-        predictions_proba = self.predict_proba(inputs)
-        predictions = np.argmax(predictions_proba, axis=1)
+        predictions = (self.predict_proba(inputs) > 0.5).astype(int)
 
         return predictions
 
@@ -33,5 +32,8 @@ class DiscriminatorModel:
         predictions = self.predict(inputs)
 
         acc = accuracy_score(labels, predictions)
-        return classification_report(labels, predictions, output_dict=True), acc
+        report = classification_report(labels, predictions, output_dict=True)
+        report = report['macro avg']
+        report['accuracy'] = acc
+        return report
 

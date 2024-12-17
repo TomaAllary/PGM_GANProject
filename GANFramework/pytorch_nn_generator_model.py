@@ -127,6 +127,6 @@ class PyTorchNNGeneratorModel(GeneratorModel):
         # Compute loss where generator goal is to have the discriminator predict REAL(=1) for all samples
         loss = self.loss_function(discriminator_predictions_tensor.squeeze(), target_labels)
         loss.backward()
-        optimizer.step()
+        self.optimizer.step()
 
         return loss.item()
