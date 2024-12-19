@@ -14,7 +14,7 @@ class GANFramework:
         self.x_validation = x_validation
         self.y_validation = np.ones(x_validation.shape[0])
 
-    def train(self, nb_of_epochs):
+    def train(self, nb_of_epochs, fix_discriminator=False):
         """
         DISCRIMINATOR UPDATE STEP
         1.1 - Gather example from real dat
@@ -40,6 +40,8 @@ class GANFramework:
 
         discriminator_metrics_per_epoch = []
 
+        last_discriminator_accuracy = 0.0 # Track accuracy to limit it
+
         # 1. Gather real examples
         real_samples_x = self.x_train
         real_samples_y = np.ones(self.y_train.shape[0])
@@ -49,50 +51,57 @@ class GANFramework:
             #     Discriminator     #
             #########################
 
-            # 2. Gather fake examples (using prior distribution)
-            fake_samples_x = self.generator.generate_samples(nb_of_samples=real_samples_x.shape[0])
-            fake_samples_y = np.zeros(real_samples_x.shape[0])
-
-            # 3. Concatenate real and fake & shuffle
-            mixed_x = np.vstack((real_samples_x, fake_samples_x))
-            mixed_y = np.hstack((real_samples_y, fake_samples_y))
-
-            indices = np.arange(len(mixed_x))
-            np.random.shuffle(indices)
-            mixed_x = mixed_x[indices]
-            mixed_y = mixed_y[indices]
-
-            # Add some noise to make discriminator game more difficult
-            corrupt_ratio = 0.15
-            nb_of_corrupted_idx = int(len(mixed_y) * corrupt_ratio)
-            np.random.shuffle(indices)
-            corrupted_indices = indices[:nb_of_corrupted_idx]
-
-            mixed_y[corrupted_indices] = (mixed_y[corrupted_indices] * -1) + 1 # Swap 0->1 & 1->0
+            # only update discriminator once it is not confident anymore
+            if last_discriminator_accuracy < 0.9 and not (fix_discriminator and epoch > 2):
+                # 2. Gather fake examples (using prior distribution)
+                fake_samples_x = self.generator.generate_samples(nb_of_samples=real_samples_x.shape[0])
+                fake_samples_y = np.zeros(real_samples_x.shape[0])
 
 
-            # 4. Train discrminator for 1 epoch
-            print(f"Training Discriminator for epoch {epoch} / {nb_of_epochs}")
-            print(f"Fake: {fake_samples_x.shape[0]}, Real: {real_samples_x.shape[0]}")
-            losses = self.discriminator.train(mixed_x, mixed_y, nb_of_epochs=1)
-            print(f"Discriminator loss after training: {losses[-1]}")
+                # 3. Concatenate real and fake & shuffle
+                mixed_x = np.vstack((real_samples_x, fake_samples_x))
+                mixed_y = np.hstack((real_samples_y, fake_samples_y))
+                # optional: add noise to images
+                noise = 0.6 * (1 - (epoch / nb_of_epochs)) #decrese noise over time
+                noise_arr = np.random.random(mixed_x.shape) * noise
+                mixed_x = mixed_x + noise_arr
+
+                indices = np.arange(len(mixed_x))
+                np.random.shuffle(indices)
+                mixed_x = mixed_x[indices]
+                mixed_y = mixed_y[indices]
+
+                # Add some corrupted labels to make discriminator game more difficult
+                corrupt_ratio = 0.15
+                nb_of_corrupted_idx = int(len(mixed_y) * corrupt_ratio)
+                np.random.shuffle(indices)
+                corrupted_indices = indices[:nb_of_corrupted_idx]
+
+                mixed_y[corrupted_indices] = (mixed_y[corrupted_indices] * -1) + 1 # Swap 0->1 & 1->0
+
+
+                # 4. Train discrminator for 1 epoch
+                print(f"Training Discriminator for epoch {epoch} / {nb_of_epochs}")
+                print(f"Fake: {fake_samples_x.shape[0]}, Real: {real_samples_x.shape[0]}")
+                losses = self.discriminator.train(mixed_x, mixed_y, nb_of_epochs=1)
+                print(f"Discriminator loss after training: {losses[-1]}")
 
             #########################
             #       Generator       #
             #########################
 
-            nb_of_generator_step_per_epoch = 4
+            nb_of_generator_step_per_epoch = 5
             for step in range(nb_of_generator_step_per_epoch):
                 # 5. Generate fake samples
                 # *use same nb of samples as discriminator to be fair
-                generated_samples = self.generator.generate_samples(mixed_x.shape[0])
+                generated_samples = self.generator.generate_samples(real_samples_x.shape[0] * 2)
                 generated_samples_target_labels = np.ones(generated_samples.shape[0])
 
                 # 6. Make discrminator predict if generator samples are real
                 predictions_proba = self.discriminator.predict_proba(generated_samples)
 
                 # 7. Update generator
-                print(f"Training Generator for epoch {epoch} / {nb_of_epochs}")
+                print(f"Training Generator for epoch {epoch}.{step} / {nb_of_epochs}")
                 print(f"Fake: {generated_samples.shape[0]}")
                 generator_loss = self.generator.update_generator(predictions_proba)
                 print(f"Generator loss after training: {generator_loss}")
@@ -102,6 +111,8 @@ class GANFramework:
             print("Discriminator Evaluation Report for epoch " + str(epoch+1))
             print(f"Precision: {report['precision']}, Recall: {report['recall']}, F1: {report['f1-score']}, Accuracy: {report['accuracy']}")
             discriminator_metrics_per_epoch.append(report)
+
+            last_discriminator_accuracy = report['accuracy']
 
         # Return metrics #TODO: explore metric for generator evaluation
         return discriminator_metrics_per_epoch

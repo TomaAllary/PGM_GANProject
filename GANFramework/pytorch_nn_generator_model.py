@@ -20,7 +20,37 @@ class PyTorchNNModel(torch.nn.Module):
             torch.nn.Linear(512, 1024),
             torch.nn.ReLU(),
             torch.nn.Linear(1024, last_layer_size),
-            torch.nn.Tanh(),
+        )
+
+    def forward(self, x):
+        output = self.model(x)
+        output = output.view(x.size(0), 1, self.output_shape[0], self.output_shape[1])
+        return output
+
+class PyTorchNNModel_v2(torch.nn.Module):
+    def __init__(self, input_size, output_shape):
+        super().__init__()
+        self.output_shape = output_shape
+        last_layer_size = output_shape[0] * output_shape[1]
+
+        self.model = torch.nn.Sequential(
+            nn.Linear(input_size, 256),
+            nn.ReLU(),
+            nn.BatchNorm1d(256),
+            nn.Dropout(0.3),
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.BatchNorm1d(512),
+            nn.Dropout(0.3),
+            nn.Linear(512, 1024),
+            nn.ReLU(),
+            nn.BatchNorm1d(1024),
+            nn.Dropout(0.3),
+            nn.Linear(1024, 2048),
+            nn.ReLU(),
+            nn.BatchNorm1d(2048),
+            nn.Dropout(0.3),
+            nn.Linear(2048, last_layer_size),
         )
 
     def forward(self, x):
@@ -29,14 +59,18 @@ class PyTorchNNModel(torch.nn.Module):
         return output
 
 class PyTorchNNGeneratorModel(GeneratorModel):
-    def __init__(self, latent_size, image_shape):
+    def __init__(self, latent_size, image_shape, version=None):
         super().__init__()
         self.hyperparameters = self.__default_hyperparameters()
 
         device_used = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"PyTorchNNGeneratorModel is using {device_used}")
         self.device = torch.device(device_used)
-        self.nn_model = PyTorchNNModel(latent_size, image_shape)
+
+        if version is None:
+            self.nn_model = PyTorchNNModel(latent_size, image_shape)
+        if version == "v2":
+            self.nn_model = PyTorchNNModel_v2(latent_size, image_shape)
 
         self.loss_function = torch.nn.BCELoss()
         self.optimizer = None
@@ -53,7 +87,6 @@ class PyTorchNNGeneratorModel(GeneratorModel):
         dict = {
             "learning_rate":0.001,
             "regularization_rate":0.001,
-            "layers":(3,)
         }
         return dict
 
@@ -91,10 +124,17 @@ class PyTorchNNGeneratorModel(GeneratorModel):
         latent_samples = self._generate_latent_samples(nb_of_samples)
         latent_samples_tensor = torch.tensor(latent_samples, dtype=torch.float32).to(self.device)
 
-        generated_samples = self.nn_model(latent_samples_tensor) # tensor of shape (n, 1, 28, 28)
+        print(latent_samples_tensor.shape)
+        logits = self.nn_model(latent_samples_tensor) # tensor of shape (n, 1, 28, 28)
+        generated_samples = torch.sigmoid(logits)
+
         generated_samples = generated_samples.squeeze(1)  # Remove the dimension at index 1
 
-        return generated_samples.cpu().detach().numpy()
+        # convert to np and remap [-1, 1] -> [0, 1]
+        # return ((generated_samples.cpu().detach().numpy()) + 1) / 2
+
+        return (generated_samples.cpu().detach().numpy())
+
 
     #Define @abstractmethod
     def update_generator(self, discriminator_predictions):
@@ -113,6 +153,8 @@ class PyTorchNNGeneratorModel(GeneratorModel):
                 lr=self.hyperparameters["learning_rate"],
                 weight_decay=self.hyperparameters["regularization_rate"]
             )
+
+        print(f"Count of missclassified images for generator update: {discriminator_predictions[(discriminator_predictions > 0.5)].shape[0]}")
 
         # Build tensors
         discriminator_predictions_tensor = torch.tensor(

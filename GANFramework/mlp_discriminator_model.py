@@ -20,7 +20,6 @@ class MLPModel(nn.Module):
             torch.nn.ReLU(),
             torch.nn.Dropout(0.3),
             torch.nn.Linear(256, 1),
-            torch.nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -41,7 +40,7 @@ class MLPDiscriminatorModel(DiscriminatorModel):
         self.mlp_model = MLPModel(input_size=(image_shape[0] * image_shape[1])).to(self.device)
 
         # Define loss function and optimizer
-        self.criterion = nn.BCELoss()
+        self.criterion = nn.BCEWithLogitsLoss()
         self.optimizer = None
 
     # Override parent function
@@ -110,7 +109,8 @@ class MLPDiscriminatorModel(DiscriminatorModel):
         self.mlp_model.eval() # Set to 'evaluation state'
         with torch.no_grad():
             inputs = torch.tensor(inputs, dtype=torch.float32).to(self.device)
-            probabilities = self.mlp_model(inputs)
+            logits = self.mlp_model(inputs)
+            probabilities = torch.sigmoid(logits)
 
         return probabilities.squeeze().cpu().numpy()
 
